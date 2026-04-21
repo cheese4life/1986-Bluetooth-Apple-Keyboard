@@ -1,15 +1,18 @@
-# 1986 Apple Keyboard to ESP32 Mapper
+# 1986 Apple Keyboard to ESP32 Bluetooth Keyboard
 
-This project replaces or bypasses the original 8048-family keyboard controller in a vintage Apple keyboard and lets an ESP32 scan the matrix directly.
+This project replaces or bypasses the original 8048-family keyboard controller in a vintage Apple keyboard and turns it into a Bluetooth Low Energy HID keyboard you can pair with any modern computer.
 
-The current firmware in `src/main.cpp` is an interactive key mapper. You press a key on the Apple keyboard, then type that key's name in the serial monitor from your computer. Once enough keys are mapped, the firmware can export a C table that you can reuse in a final USB or Bluetooth keyboard firmware.
+The firmware in `src/main.cpp` is dual-mode:
+
+1. **Mapping mode** — interactive serial mapper. You press a key on the Apple keyboard, then type that key's name in the serial monitor. When you're done, type `save` and the firmware writes the mapping to flash and reboots.
+2. **BLE mode** — once a saved keymap exists in flash, the ESP32 boots straight into Bluetooth mode and advertises itself as `Apple M0116`. Pair it from your computer's Bluetooth menu and start typing.
 
 This repo was developed against an Apple M0116 that originally used a NEC 8048-family controller, but the same general approach can be used on other Apple keyboards built around an Intel MCS-48 / 8048-family chip in a 40-pin DIP package.
 
 ## What This Repo Contains
 
-- `src/main.cpp`: the active ESP32 key-mapper firmware
-- `platformio.ini`: PlatformIO config for the ESP32 dev board target
+- `src/main.cpp`: the active dual-mode ESP32 firmware (mapper + BLE HID keyboard)
+- `platformio.ini`: PlatformIO config for the ESP32 dev board target, including the BLE keyboard library dependency
 - `WIRING.md`: the current known-good pin assignment for the tested keyboard in this repo
 - `backups/`: older bring-up and diagnostic firmware snapshots
 
@@ -19,10 +22,8 @@ Use this project when you want to:
 
 - revive a dead or removed 8048-family keyboard controller
 - discover the matrix on a vintage Apple keyboard
-- map every physical key before writing final HID firmware
-- build a USB or Bluetooth conversion around an ESP32
-
-This repo is currently a bring-up and mapping tool first. It is not yet a polished end-user Bluetooth keyboard firmware.
+- map every physical key once over serial
+- use the keyboard as a Bluetooth HID keyboard with any modern Mac, Windows, Linux, iOS, or Android device
 
 ## Supported Hardware
 
@@ -116,22 +117,74 @@ pio device list
 
 ## Using The Mapper
 
-After flashing, open the serial monitor at 115200 baud.
+After flashing for the first time (or after wiping the keymap), open the serial monitor at 115200 baud. The firmware boots into mapping mode whenever no saved keymap exists in flash.
 
 The mapper will wait for a key press from the Apple keyboard. Then:
 
 1. Press one key on the Apple keyboard.
 2. Read the detected row and column in the serial output.
-3. Type that key's name from your computer keyboard.
-4. Repeat until enough of the matrix is mapped.
+3. Type that key's name from your computer keyboard and press Enter.
+4. Repeat until every key you care about is mapped.
+5. Type `save` to commit the keymap to flash and reboot into Bluetooth mode.
 
-Built-in serial commands:
+Key-name conventions used by the BLE layer:
 
-- `map`: show current mappings
-- `export`: print generated C arrays for later firmware
-- `undo`: remove the most recent mapping
-- `count`: show how many keys are mapped
-- `help`: print the help text again
+- single printable characters (`a`, `A`, `1`, `;`) → that character
+- `Return`, `Space`, `Tab`, `Escape`
+- `Delete` (the Mac-style key that deletes left), `FwdDelete` (deletes right)
+- `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `Insert`
+- `F1`–`F12`
+- `CapsLock`
+- modifiers: `Shift`, `Ctrl`, `Option` (or `Alt`), `Command` (or `Cmd` / `Gui`); `L`/`R` prefix selects left or right side
+
+The shortcuts the prompt accepts:
+
+- just press Enter → `"Return"`
+- type a space then Enter → `"Space"`
+- press Tab then Enter → `"Tab"`
+- press an arrow key then Enter → `"Up"`/`"Down"`/`"Left"`/`"Right"`
+- type `skip` to skip the current physical key
+
+Built-in serial commands while waiting for a key press:
+
+- `map` — show current mappings
+- `undo` — remove the most recent mapping
+- `count` — show how many keys are mapped
+- `save` — write keymap to flash and reboot into Bluetooth mode
+- `clear` — erase the saved keymap (stays in mapping mode)
+- `help` — print the help text again
+
+## Using It Over Bluetooth
+
+Once you have typed `save`, the ESP32 reboots and starts advertising as a Bluetooth Low Energy keyboard.
+
+1. On your computer, open the Bluetooth settings.
+2. Look for a device named **`Apple M0116`** and pair with it. No PIN is required.
+3. Start typing on the Apple keyboard. Keys go through over BLE just like any other wireless keyboard.
+
+The pairing is remembered by the host. After the first pairing, the ESP32 will reconnect automatically whenever it powers on and the host is in range.
+
+USB on the ESP32 is only used for power and (optionally) the serial console. You do not need to keep it plugged into your computer once you have powered it from any USB source.
+
+### Re-mapping Keys Later
+
+There are two ways to get back into mapping mode:
+
+- **Hold CapsLock at boot for ~2 seconds.** The firmware detects this, wipes the saved keymap, and stays in mapping mode.
+- **Send `remap` over the serial monitor while in BLE mode.** This erases the keymap and reboots into mapping mode.
+
+### Serial Commands While In BLE Mode
+
+- `status` — show whether BLE is connected and how many mappings are loaded
+- `map` — print the current keymap
+- `remap` (or `clear`) — wipe the saved keymap and reboot into mapping mode
+
+### Bluetooth Troubleshooting
+
+- **Device does not appear in your Bluetooth menu.** Make sure the ESP32 is powered, and that the serial monitor shows `BLE MODE` and `advertising`. If it shows mapping mode instead, no keymap is saved yet — map some keys and run `save`.
+- **Pairs but nothing types.** Make sure the keys you actually press are mapped. Use `map` over serial to see what was saved. Anything that wasn't mapped is silently ignored in BLE mode.
+- **Modifiers do not work.** They must be mapped using one of the modifier names above (`Shift`, `Option`, `Command`, `Ctrl`). A modifier mapped to a regular character will type that character instead of acting as a modifier.
+- **Wrong characters appear.** The ESP32 sends standard US-layout HID scan codes. If your computer is set to a different keyboard layout, set its input source to `U.S.` or remap individual keys in mapping mode.
 
 ## Adapting This To Another 8048-Based Apple Keyboard
 
@@ -165,4 +218,4 @@ On some boards, not every P2 pin will be part of the main scanned matrix. Some m
 
 ## Project Status
 
-This repo currently contains a working matrix mapper and a known-good wiring map for the tested board. The natural next step after mapping is to build final USB or BLE HID firmware around the discovered matrix.
+This repo contains a working matrix mapper, a known-good wiring map for the tested board, and a Bluetooth Low Energy HID keyboard layer that uses the saved keymap. After mapping a board once, it behaves like a normal wireless keyboard.
