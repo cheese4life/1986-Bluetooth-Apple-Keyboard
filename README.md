@@ -1,5 +1,8 @@
 # 1986 Apple Keyboard to ESP32 Bluetooth Keyboard
 
+CHECK OUT MY DEMO HERE!!
+[link text](https://youtu.be/9Xv3Wkmixdc)
+
 This project replaces or bypasses the original 8048-family keyboard controller in a vintage Apple keyboard and turns it into a Bluetooth Low Energy HID keyboard you can pair with any modern computer.
 
 The firmware in `src/main.cpp` is dual-mode:
